@@ -103,52 +103,122 @@ void dump_func(Head &&head, Tail &&...tail) {
 const int INF = (ll)1e9;
 const ll INFLL = (ll)1e18 + 1;
 
-/*
-const int dx[8] = {1, 0, -1, 0, 1, -1, -1, 1};
-const int dy[8] = {0, 1, 0, -1, 1, 1, -1, -1};
-const string dir = "DRUL";
-*/
+constexpr int MAX_TASK_NUM = 1000;
+constexpr int MAX_SKILL_NUM = 20;
+int requiredSkills[MAX_TASK_NUM][MAX_SKILL_NUM];
 
-int taskNum, memberNum, skillNum, dependNum;
-int taskSkills[1000][20];
-class Solver {
+class Task {
   public:
-    Solver() {}
+    int id;
+    bool stillWorked;
+    bool isCompleted;
+    vector<int> dependency;
+    Task(int _id, const vector<int> &_dependency)
+        : id(_id), stillWorked(false), isCompleted(false),
+          dependency(_dependency) {}
 
-    vector<P> solve(int day) {
-        vector<P> res;
-        if(day == 1) {
-            return vector<P>(1, {1, 1});
-        }
-        return res;
+    void setCompleted() {
+        stillWorked = false;
+        isCompleted = true;
     }
 };
 
-void initialInput() {
-    cin >> taskNum >> memberNum >> skillNum >> dependNum;
-    for(int i = 0; i < taskNum; i++) {
-        for(int j = 0; j < skillNum; j++) {
-            cin >> taskSkills[i][j];
-        }
-    }
-    for(int i = 0; i < dependNum; i++) {
-        int u, v;
-        cin >> u >> v;
-        u--, v--;
-    }
-}
+class Member {
+  public:
+    int id;
+    vector<int> estimatedSkillLevels;
+    vector<int> assignedTasks;
+    vector<int> assignedDay;
+    vector<int> freeedDay;
+    bool assigned;
+    Member(int _id) : id(_id), assigned(false) {}
 
-vector<int> dayInput() {
+    bool isAssigned() { return assigned; }
+
+    bool isFree() { return !assigned; }
+
+    void assignTask(const Task &task, int day) {
+        dump("Assign task", day, task.id, this->id);
+        assignedTasks.emplace_back(task.id);
+        assignedDay.emplace_back(day);
+        assigned = true;
+    }
+
+    void freeFromTask(int day) {
+        assigned = false;
+        freeedDay.emplace_back(day);
+    }
+};
+
+class Solver {
+  public:
+    int taskNum;
+    int memberNum;
+    int skillNum;
+    int dependencyNum;
+    vector<Member> members;
+    vector<Task> tasks;
+    Solver(int _taskNum, int _memberNum, int _skillNum, int _dependencyNum)
+        : taskNum(_taskNum), memberNum(_memberNum), skillNum(_skillNum),
+          dependencyNum(_dependencyNum) {}
+    vector<P> solve(int day) {
+        vector<P> res;
+        for(Task &task : tasks) {
+            if(isAssignable(task)) {
+                for(Member &member : members) {
+                    if(!member.isAssigned()) {
+                        member.assignTask(task, day);
+                        task.stillWorked = true;
+                        res.emplace_back(member.id, task.id);
+                        break;
+                    }
+                }
+            }
+        }
+        return res;
+    }
+
+    // memberIdに割り当てられていたtaskをcompletedにする
+    void setCompleted(int memberId, int day) {
+        members[memberId].freeFromTask(day);
+        int completedTaskId = members[memberId].assignedTasks.back();
+        tasks[completedTaskId].setCompleted();
+    }
+
+    // for initialization
+    void setMember(int memberId) { members.emplace_back(Member(memberId)); }
+
+    // for initialization
+    void setTask(int taskId, const vector<int> &dependency) {
+        tasks.emplace_back(Task(taskId, dependency));
+    }
+
+    bool isAssignable(Task &task) {
+        if(task.stillWorked || task.isCompleted) {
+            return false;
+        }
+        for(int taskId : task.dependency) {
+            if(!tasks[taskId].isCompleted) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+// Input per day from judge server.
+vector<int> getCompletedMemberIds() {
     int num;
     cin >> num;
     if(num == -1) {
         return vector<int>(1, -1);
     }
-    vector<int> in(num);
+    vector<int> completedMemberIds(num);
     for(int i = 0; i < num; i++) {
-        cin >> in[i];
+        cin >> completedMemberIds[i];
+        completedMemberIds[i]--;
     }
-    return in;
+    return completedMemberIds;
 }
 
 void output(const vector<P> &out) {
@@ -160,7 +230,7 @@ void output(const vector<P> &out) {
     }
     cout << ' ';
     for(int i = 0; i < (int)out.size(); i++) {
-        cout << out[i].first << ' ' << out[i].second;
+        cout << out[i].first + 1 << ' ' << out[i].second + 1;
         if(i == (int)out.size() - 1) {
             cout << endl;
         } else {
@@ -168,19 +238,58 @@ void output(const vector<P> &out) {
         }
     }
 }
-int main() {
-    Solver aSolver;
 
-    initialInput();
+// valiable for input.
+vector<int> _taskDependency[MAX_TASK_NUM]; // taskDependency[i]:
+                                           // iの前に完了するべきタスクのリスト
+int main() {
+    // input
+    int taskNum;   // = 1000
+    int memberNum; // = 20;
+    int skillNum;  // 10 - 20
+    int dependNum; // 1000 - 3000
+    cin >> taskNum >> memberNum >> skillNum >> dependNum;
+    for(int i = 0; i < taskNum; i++) {
+        for(int j = 0; j < skillNum; j++) {
+            cin >> requiredSkills[i][j];
+        }
+    }
+    for(int i = 0; i < dependNum; i++) {
+        int u, v;
+        cin >> u >> v;
+        u--, v--;
+        _taskDependency[v].emplace_back(u);
+    }
+    // initialize Solver.
+    Solver aSolver(taskNum, memberNum, skillNum, dependNum);
+    {
+        // initialize members
+        for(int memberId = 0; memberId < memberNum; memberId++) {
+            aSolver.setMember(memberId);
+        }
+        // initialize tasks
+        for(int taskId = 0; taskId < taskNum; taskId++) {
+            aSolver.setTask(taskId, _taskDependency[taskId]);
+        }
+    }
+
+    // iterate
     int day = 1;
     while(true) {
-        vector<P> out = aSolver.solve(day);
-        output(out);
-        vector<int> in = dayInput();
-        dump(day, out, in);
-        if((int)in.size() == 1 && in[0] == -1) {
-            return 0;
+        vector<P> assignList = aSolver.solve(day);
+        output(assignList);
+        vector<int> completedMemberIds = getCompletedMemberIds();
+        dump(day);
+        dump(assignList);
+        dump(completedMemberIds);
+        if(completedMemberIds.size() == 1 && completedMemberIds[0] == -1) {
+            break;
+        }
+        //
+        for(int memberId : completedMemberIds) {
+            aSolver.setCompleted(memberId, day);
         }
         day++;
     }
+    return 0;
 }
