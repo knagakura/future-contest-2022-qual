@@ -204,13 +204,6 @@ class Solver {
         }
     }
     vector<P> solve(const int day) {
-        // 優先順位をつける
-        sort(tasks.begin(), tasks.end(), [](const Task &a, const Task &b) {
-            if(a.dependencyRemained() != b.dependencyRemained()) {
-                return a.dependencyRemained() < b.dependencyRemained();
-            }
-            return a.id < b.id;
-        });
         for(int i = 0; i < taskNum; i++) {
             taskId2Index[tasks[i].id] = i;
         }
@@ -224,21 +217,26 @@ class Solver {
                     if(task.isAssignable()) {
                         if(chmin(minCost, calcCost(member, task))) {
                             minTaskId = task.id;
-                            break;
                         }
                     }
                 }
                 if(minTaskId != -1) {
                     int minIndex = taskId2Index[minTaskId];
-                    dump(member.id, tasks[minIndex].id, minCost);
-                    dump(tasks[minIndex].dependency);
-                    dump(tasks[minIndex].dependencyRemained());
                     member.assignTask(tasks[minIndex]);
                     tasks[minIndex].setAssigned(day);
                     res.emplace_back(member.id, tasks[minIndex].id);
                 }
             }
         }
+        int neetMemberCnt = 0;
+        for(const Member &member : members) {
+            neetMemberCnt += !member.assigned;
+        }
+        int remainedTaskCnt = 0;
+        for(const Task &task : tasks) {
+            remainedTaskCnt += !(task.stillWorked || task.isCompleted);
+        }
+        dump(day, neetMemberCnt, remainedTaskCnt);
         return res;
     }
 
@@ -263,7 +261,6 @@ class Solver {
     void setTask(int taskId, const vector<double> &requiredSkills,
                  const vector<int> &dependency) {
         tasks.emplace_back(Task(taskId, requiredSkills, dependency));
-        dump(taskId, requiredSkills);
     }
 
     void setTaskDependencies() {
@@ -280,6 +277,9 @@ class Solver {
         for(int skillIndex = 0; skillIndex < skillNum; skillIndex++) {
             res += max(0.0, task.requiredSkills[skillIndex] -
                                 member.estimatedSkills[skillIndex]);
+        }
+        if(!isLeafTask(task)){
+            return 0;
         }
         return res;
     }
@@ -302,9 +302,6 @@ class Solver {
   private:
     void _estimate(Member &member, const Task &task) {
         int taskTime = task.completedDay - task.assignedDay + 1;
-        dump(taskTime);
-        dump(task.requiredSkills);
-        dump(member.estimatedSkills);
 
         if(task.skillSum <= 40 && taskTime < task.skillSum / 10) {
             for(int i = 0; i < skillNum; i++) {
@@ -331,6 +328,10 @@ class Solver {
             res += abs(a.requiredSkills[i] - b.requiredSkills[i]);
         }
     }
+
+    bool isLeafTask(const Task &task) {
+        return dependencyGraph[task.id].empty();
+    }
 };
 
 // Input per day from judge server.
@@ -349,7 +350,6 @@ vector<int> getCompletedMemberIds() {
 }
 
 void output(const vector<P> &out) {
-    dump(out);
     cout << out.size();
     if(out.empty()) {
         cout << endl;
@@ -364,6 +364,7 @@ void output(const vector<P> &out) {
             cout << ' ';
         }
     }
+    dump(out);
 }
 
 // valiable for input.
