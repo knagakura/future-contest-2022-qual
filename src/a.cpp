@@ -163,11 +163,13 @@ class Member {
   public:
     int id;
     vector<double> estimatedSkills;
+    vector<double> minEstimatedSkills;
     vector<int> assignedTaskIds;
     bool assigned;
     Member() {}
     Member(int _id, int skillNum) : id(_id), assigned(false) {
         estimatedSkills.assign(skillNum, 0.0);
+        minEstimatedSkills.assign(skillNum, 0.0);
     }
 
     bool isAssigned() { return assigned; }
@@ -191,6 +193,7 @@ class Solver {
     vector<Member> members;
     vector<Task> tasks;
     int taskId2Index[MAX_TASK_NUM];
+    int taskDistance[MAX_TASK_NUM][MAX_TASK_NUM];
     vector<vector<int>> dependencyGraph;
     Solver(int _taskNum, int _memberNum, int _skillNum, int _dependencyNum,
            const vector<vector<int>> &_dependencyGraph)
@@ -260,12 +263,14 @@ class Solver {
     void setTask(int taskId, const vector<double> &requiredSkills,
                  const vector<int> &dependency) {
         tasks.emplace_back(Task(taskId, requiredSkills, dependency));
+        dump(taskId, requiredSkills);
     }
 
     void setTaskDependencies() {
-        for (Task &task : tasks) {
-            for (int dependedTaskIds : task.dependency) {
-                task.addUncompletedDependedSkillSum(tasks[taskId2Index[dependedTaskIds]]);
+        for(Task &task : tasks) {
+            for(int dependedTaskIds : task.dependency) {
+                task.addUncompletedDependedSkillSum(
+                    tasks[taskId2Index[dependedTaskIds]]);
             }
         }
     }
@@ -286,7 +291,8 @@ class Solver {
     }
 
     void outEstimate(int memberId) {
-        cout << "#s" << " " << memberId + 1 << " ";
+        cout << "#s"
+             << " " << memberId + 1 << " ";
         for(double x : members[memberId].estimatedSkills) {
             cout << (int)x << " ";
         }
@@ -299,11 +305,30 @@ class Solver {
         dump(taskTime);
         dump(task.requiredSkills);
         dump(member.estimatedSkills);
+
+        if(task.skillSum <= 40 && taskTime < task.skillSum / 10) {
+            for(int i = 0; i < skillNum; i++) {
+                chmax(member.minEstimatedSkills[i], task.requiredSkills[i]);
+            }
+        }
+        else if(task.skillSum > 40 && taskTime < task.skillSum / 15) {
+            for(int i = 0; i < skillNum; i++) {
+                chmax(member.minEstimatedSkills[i], task.requiredSkills[i]);
+            }
+        }
         for(int i = 0; i < skillNum; i++) {
             double add =
                 max(0.0, task.requiredSkills[i] - double(taskTime) / skillNum);
-            member.estimatedSkills[i] = (member.estimatedSkills[i] + add) /
-                                        member.assignedTaskIds.size();
+            member.estimatedSkills[i] = max(member.minEstimatedSkills[i],
+                                            (member.estimatedSkills[i] + add) /
+                                                member.assignedTaskIds.size());
+        }
+    }
+
+    int distance(const Task &a, const Task &b) {
+        int res = 0;
+        for(int i = 0; i < skillNum; i++) {
+            res += abs(a.requiredSkills[i] - b.requiredSkills[i]);
         }
     }
 };
