@@ -112,13 +112,20 @@ class Task {
     int completedDay;
     bool stillWorked;
     bool isCompleted;
-    vector<int> dependency;
     vector<double> requiredSkills;
+    double skillSum;
+    vector<int> dependency;
+    vector<int> dependencyCompleted;
+    double uncompletedDependedSkillSum;
     Task(int _id, const vector<double> &_requiredSkills,
          const vector<int> &_dependency)
         : id(_id), assignedDay(-1), completedDay(-1), stillWorked(false),
           isCompleted(false), requiredSkills(_requiredSkills),
-          dependency(_dependency) {}
+          dependency(_dependency), dependencyCompleted(0),
+          uncompletedDependedSkillSum(0.0) {
+        this->skillSum =
+            accumulate(requiredSkills.begin(), requiredSkills.end(), 0.0);
+    }
 
     void setCompleted(int day) {
         this->stillWorked = false;
@@ -129,6 +136,26 @@ class Task {
     void setAssigned(int day) {
         this->stillWorked = true;
         this->assignedDay = day;
+    }
+
+    int dependencyRemained() const {
+        return (int)dependency.size() - (int)dependencyCompleted.size();
+    }
+
+    bool isAssignable() {
+        if(this->stillWorked || this->isCompleted) {
+            return false;
+        }
+        return dependencyRemained() == 0;
+    }
+
+    void addDependencyCompleted(const Task &dependedTask) {
+        this->dependencyCompleted.emplace_back(dependedTask.id);
+        this->uncompletedDependedSkillSum -= dependedTask.skillSum;
+    }
+
+    void addUncompletedDependedSkillSum(const Task &task) {
+        this->uncompletedDependedSkillSum += task.skillSum;
     }
 };
 
@@ -163,27 +190,49 @@ class Solver {
     int dependencyNum;
     vector<Member> members;
     vector<Task> tasks;
-    Solver(int _taskNum, int _memberNum, int _skillNum, int _dependencyNum)
+    int taskId2Index[MAX_TASK_NUM];
+    vector<vector<int>> dependencyGraph;
+    Solver(int _taskNum, int _memberNum, int _skillNum, int _dependencyNum,
+           const vector<vector<int>> &_dependencyGraph)
         : taskNum(_taskNum), memberNum(_memberNum), skillNum(_skillNum),
-          dependencyNum(_dependencyNum) {}
+          dependencyNum(_dependencyNum), dependencyGraph(_dependencyGraph) {
+        for(int i = 0; i < taskNum; i++) {
+            taskId2Index[i] = i;
+        }
+    }
     vector<P> solve(const int day) {
+        // 優先順位をつける
+        sort(tasks.begin(), tasks.end(), [](const Task &a, const Task &b) {
+            if(a.dependencyRemained() != b.dependencyRemained()) {
+                return a.dependencyRemained() < b.dependencyRemained();
+            }
+            return a.id < b.id;
+        });
+        for(int i = 0; i < taskNum; i++) {
+            taskId2Index[tasks[i].id] = i;
+        }
+
         vector<P> res;
         for(Member &member : members) {
             if(!member.isAssigned()) {
                 double minCost = INF;
-                int minTaskIndex = -1;
+                int minTaskId = -1;
                 for(Task &task : tasks) {
-                    if(isAssignable(task)) {
+                    if(task.isAssignable()) {
                         if(chmin(minCost, calcCost(member, task))) {
-                            minTaskIndex = task.id;
+                            minTaskId = task.id;
+                            break;
                         }
                     }
                 }
-                if(minTaskIndex != -1) {
-                    dump(member.id, minTaskIndex, minCost);
-                    member.assignTask(tasks[minTaskIndex]);
-                    tasks[minTaskIndex].setAssigned(day);
-                    res.emplace_back(member.id, tasks[minTaskIndex].id);
+                if(minTaskId != -1) {
+                    int minIndex = taskId2Index[minTaskId];
+                    dump(member.id, tasks[minIndex].id, minCost);
+                    dump(tasks[minIndex].dependency);
+                    dump(tasks[minIndex].dependencyRemained());
+                    member.assignTask(tasks[minIndex]);
+                    tasks[minIndex].setAssigned(day);
+                    res.emplace_back(member.id, tasks[minIndex].id);
                 }
             }
         }
@@ -194,7 +243,12 @@ class Solver {
     void setCompleted(int memberId, int day) {
         members[memberId].freeFromTask();
         int completedTaskId = members[memberId].assignedTaskIds.back();
-        tasks[completedTaskId].setCompleted(day);
+        Task &completedTask = tasks[taskId2Index[completedTaskId]];
+        completedTask.setCompleted(day);
+        for(int nxtTaskId : dependencyGraph[completedTaskId]) {
+            tasks[taskId2Index[nxtTaskId]].addDependencyCompleted(
+                completedTask);
+        }
     }
 
     // for initialization
@@ -208,16 +262,12 @@ class Solver {
         tasks.emplace_back(Task(taskId, requiredSkills, dependency));
     }
 
-    bool isAssignable(Task &task) {
-        if(task.stillWorked || task.isCompleted) {
-            return false;
-        }
-        for(int taskId : task.dependency) {
-            if(!tasks[taskId].isCompleted) {
-                return false;
+    void setTaskDependencies() {
+        for (Task &task : tasks) {
+            for (int dependedTaskIds : task.dependency) {
+                task.addUncompletedDependedSkillSum(tasks[taskId2Index[dependedTaskIds]]);
             }
         }
-        return true;
     }
 
     double calcCost(const Member &member, const Task &task) {
@@ -231,8 +281,16 @@ class Solver {
 
     void estimate(int memberId) {
         int completedTaskId = members[memberId].assignedTaskIds.back();
-        _estimate(members[memberId], tasks[completedTaskId]);
+        _estimate(members[memberId], tasks[taskId2Index[completedTaskId]]);
         return;
+    }
+
+    void outEstimate(int memberId) {
+        cout << "#s" << " " << memberId + 1 << " ";
+        for(double x : members[memberId].estimatedSkills) {
+            cout << (int)x << " ";
+        }
+        cout << endl;
     }
 
   private:
@@ -242,8 +300,10 @@ class Solver {
         dump(task.requiredSkills);
         dump(member.estimatedSkills);
         for(int i = 0; i < skillNum; i++) {
-            double add = max(0.0, task.requiredSkills[i] - double(taskTime) / skillNum);
-            member.estimatedSkills[i] = (member.estimatedSkills[i] + add) / member.assignedTaskIds.size();
+            double add =
+                max(0.0, task.requiredSkills[i] - double(taskTime) / skillNum);
+            member.estimatedSkills[i] = (member.estimatedSkills[i] + add) /
+                                        member.assignedTaskIds.size();
         }
     }
 };
@@ -299,14 +359,16 @@ int main() {
             _requiredSkills[i].emplace_back(r);
         }
     }
+    vector<vector<int>> _dependencyGraph(taskNum);
     for(int i = 0; i < dependNum; i++) {
         int u, v;
         cin >> u >> v;
         u--, v--;
         _taskDependency[v].emplace_back(u);
+        _dependencyGraph[u].emplace_back(v);
     }
     // initialize Solver.
-    Solver aSolver(taskNum, memberNum, skillNum, dependNum);
+    Solver aSolver(taskNum, memberNum, skillNum, dependNum, _dependencyGraph);
     {
         // initialize members
         for(int memberId = 0; memberId < memberNum; memberId++) {
@@ -317,6 +379,7 @@ int main() {
             aSolver.setTask(taskId, _requiredSkills[taskId],
                             _taskDependency[taskId]);
         }
+        aSolver.setTaskDependencies();
     }
 
     // iterate
@@ -336,6 +399,7 @@ int main() {
             aSolver.setCompleted(memberId, day);
             // estimate the skills of member.
             aSolver.estimate(memberId);
+            aSolver.outEstimate(memberId);
         }
         day++;
     }
