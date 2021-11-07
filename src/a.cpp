@@ -105,6 +105,20 @@ const ll INFLL = (ll)1e18 + 1;
 
 constexpr int MAX_TASK_NUM = 1000;
 
+uint32_t rnd(void) {
+    static uint32_t x = 123456789;
+    static uint32_t y = 362436069;
+    static uint32_t z = 521288629;
+    static uint32_t w = 88675123;
+    uint32_t t;
+
+    t = x ^ (x << 11);
+    x = y;
+    y = z;
+    z = w;
+    return w = (w ^ (w >> 19)) ^ (t ^ (t >> 8));
+}
+
 class Task {
   public:
     int id;
@@ -142,8 +156,10 @@ class Task {
         return (int)dependency.size() - (int)dependencyCompleted.size();
     }
 
+    bool isAssigned() const { return this->stillWorked || this->isCompleted; }
+
     bool isAssignable() {
-        if(this->stillWorked || this->isCompleted) {
+        if(isAssigned()) {
             return false;
         }
         return dependencyRemained() == 0;
@@ -207,13 +223,35 @@ class Solver {
         for(int i = 0; i < taskNum; i++) {
             taskId2Index[tasks[i].id] = i;
         }
-
+        int rootTaskCnt = 0;
+        int leafTaskCnt = 0;
+        int independedTaskCnt = 0;
+        int independedUnassignedTaskCnt = 0;
+        for(Task &task : tasks) {
+            if(isLeafTask(task)) {
+                leafTaskCnt++;
+            }
+            if(isRootTask(task)) {
+                rootTaskCnt++;
+            }
+            if(isIndependedTask(task)) {
+                independedTaskCnt++;
+                if(!task.isAssigned()) {
+                    independedUnassignedTaskCnt++;
+                }
+            }
+        }
+        dump(rootTaskCnt, leafTaskCnt, independedTaskCnt, independedUnassignedTaskCnt);
         vector<P> res;
         for(Member &member : members) {
             if(!member.isAssigned()) {
                 double minCost = INF;
                 int minTaskId = -1;
+                bool allAssigned = true;
                 for(Task &task : tasks) {
+                    if(!task.isAssigned()) {
+                        allAssigned = false;
+                    }
                     if(task.isAssignable()) {
                         if(chmin(minCost, calcCost(member, task))) {
                             minTaskId = task.id;
@@ -225,6 +263,8 @@ class Solver {
                     member.assignTask(tasks[minIndex]);
                     tasks[minIndex].setAssigned(day);
                     res.emplace_back(member.id, tasks[minIndex].id);
+                } else if(not allAssigned) {
+                    dump("緊急事態！！！！");
                 }
             }
         }
@@ -234,7 +274,7 @@ class Solver {
         }
         int remainedTaskCnt = 0;
         for(const Task &task : tasks) {
-            remainedTaskCnt += !(task.stillWorked || task.isCompleted);
+            remainedTaskCnt += !task.isAssigned();
         }
         dump(day, neetMemberCnt, remainedTaskCnt);
         return res;
@@ -278,7 +318,7 @@ class Solver {
             res += max(0.0, task.requiredSkills[skillIndex] -
                                 member.estimatedSkills[skillIndex]);
         }
-        if(!isLeafTask(task)){
+        if(!isLeafTask(task)) {
             return 0;
         }
         return res;
@@ -303,12 +343,11 @@ class Solver {
     void _estimate(Member &member, const Task &task) {
         int taskTime = task.completedDay - task.assignedDay + 1;
 
-        if(task.skillSum <= 40 && taskTime < task.skillSum / 10) {
+        if(task.skillSum <= 40 && taskTime <= max(4.0, task.skillSum / 10)) {
             for(int i = 0; i < skillNum; i++) {
                 chmax(member.minEstimatedSkills[i], task.requiredSkills[i]);
             }
-        }
-        else if(task.skillSum > 40 && taskTime < task.skillSum / 15) {
+        } else if(task.skillSum > 40 && taskTime <= max(4.0, task.skillSum / 15)) {
             for(int i = 0; i < skillNum; i++) {
                 chmax(member.minEstimatedSkills[i], task.requiredSkills[i]);
             }
@@ -331,6 +370,12 @@ class Solver {
 
     bool isLeafTask(const Task &task) {
         return dependencyGraph[task.id].empty();
+    }
+
+    bool isRootTask(const Task &task) { return task.dependency.empty(); }
+
+    bool isIndependedTask(const Task &task) {
+        return isRootTask(task) && isLeafTask(task);
     }
 };
 
@@ -429,5 +474,6 @@ int main() {
         }
         day++;
     }
+    dump(skillNum, dependNum);
     return 0;
 }
