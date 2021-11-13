@@ -223,6 +223,15 @@ class Solver {
         for(int i = 0; i < taskNum; i++) {
             taskId2Index[tasks[i].id] = i;
         }
+        int neetMemberCnt = 0;
+        for(const Member &member : members) {
+            neetMemberCnt += !member.assigned;
+        }
+        int remainedTaskCnt = 0;
+        for(const Task &task : tasks) {
+            remainedTaskCnt += !task.isAssigned();
+        }
+        dump(day, neetMemberCnt, remainedTaskCnt);
         int rootTaskCnt = 0;
         int leafTaskCnt = 0;
         int independedTaskCnt = 0;
@@ -241,7 +250,8 @@ class Solver {
                 }
             }
         }
-        dump(rootTaskCnt, leafTaskCnt, independedTaskCnt, independedUnassignedTaskCnt);
+        dump(rootTaskCnt, leafTaskCnt, independedTaskCnt,
+             independedUnassignedTaskCnt);
         vector<P> res;
         for(Member &member : members) {
             if(!member.isAssigned()) {
@@ -253,7 +263,15 @@ class Solver {
                         allAssigned = false;
                     }
                     if(task.isAssignable()) {
-                        if(chmin(minCost, calcCost(member, task))) {
+                        double estimatedCost = calcCost(member, task);
+                        if(!isLeafTask(task)) {
+                            if(remainedTaskCnt < 200) {
+                                estimatedCost -= 1000;
+                            } else {
+                                estimatedCost = 0;
+                            }
+                        }
+                        if(chmin(minCost, estimatedCost)) {
                             minTaskId = task.id;
                         }
                     }
@@ -268,15 +286,6 @@ class Solver {
                 }
             }
         }
-        int neetMemberCnt = 0;
-        for(const Member &member : members) {
-            neetMemberCnt += !member.assigned;
-        }
-        int remainedTaskCnt = 0;
-        for(const Task &task : tasks) {
-            remainedTaskCnt += !task.isAssigned();
-        }
-        dump(day, neetMemberCnt, remainedTaskCnt);
         return res;
     }
 
@@ -318,15 +327,13 @@ class Solver {
             res += max(0.0, task.requiredSkills[skillIndex] -
                                 member.estimatedSkills[skillIndex]);
         }
-        if(!isLeafTask(task)) {
-            return 0;
-        }
         return res;
     }
 
     void estimate(int memberId) {
         int completedTaskId = members[memberId].assignedTaskIds.back();
         _estimate(members[memberId], tasks[taskId2Index[completedTaskId]]);
+        _estimate2(members[memberId], tasks[taskId2Index[completedTaskId]]);
         return;
     }
 
@@ -347,7 +354,8 @@ class Solver {
             for(int i = 0; i < skillNum; i++) {
                 chmax(member.minEstimatedSkills[i], task.requiredSkills[i]);
             }
-        } else if(task.skillSum > 40 && taskTime <= max(4.0, task.skillSum / 15)) {
+        } else if(task.skillSum > 40 &&
+                  taskTime <= max(4.0, task.skillSum / 15)) {
             for(int i = 0; i < skillNum; i++) {
                 chmax(member.minEstimatedSkills[i], task.requiredSkills[i]);
             }
@@ -358,6 +366,38 @@ class Solver {
             member.estimatedSkills[i] = max(member.minEstimatedSkills[i],
                                             (member.estimatedSkills[i] + add) /
                                                 member.assignedTaskIds.size());
+        }
+    }
+
+    void _estimate2(Member &member, const Task &task) {
+        {
+            vector<int> taskTimes;
+            for(const int taskId : member.assignedTaskIds) {
+                Task &task = tasks[taskId2Index[taskId]];
+                int taskTime = task.completedDay - task.assignedDay + 1;
+                taskTimes.emplace_back(taskTime);
+            }
+            dump(member.assignedTaskIds);
+            dump(taskTimes);
+        }
+        // あるスキルの予測を+1しても不整合がないか
+        for(int skillId = 0; skillId < skillNum; skillId++) {
+            member.estimatedSkills[skillId] += 1.0;
+            bool ok = true;
+            for(const int taskId : member.assignedTaskIds) {
+                Task &task = tasks[taskId2Index[taskId]];
+                int taskTime = task.completedDay - task.assignedDay + 1;
+                int estimatedTime = max(1.0, calcCost(member, task));
+                dump(taskTime, estimatedTime);
+                if(taskTime - 3 > estimatedTime) {
+                    ok = false;
+                }
+            }
+            if(not ok) {
+                member.estimatedSkills[skillId] -= 1.0;
+            } else {
+                dump("age");
+            }
         }
     }
 
